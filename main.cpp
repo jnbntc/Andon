@@ -19,19 +19,28 @@
 #include <thread>
 #include <unistd.h>
 
+#include <iomanip>
+#include <sstream>
+#include <string>
+
 #include "keymap.h"
 #include "led.h"
 
 using namespace std;
 
-const string inputDevPath_Unitech = "/dev/input/by-id/usb-_HID_Keyboard_1.000-event-kbd";
-const string inputDevPath_Datalogic = "/dev/input/by-id/usb-Datalogic_ADC__Inc._Handheld_Barcode_Scanner_S_N_G17M22141-event-kbd";
+std::string inputDevPath_Unitech;
+std::string inputDevPath_Datalogic;
+std::string idScanner;
+bool sendIDScanner;
+bool logMessageFile;
 
 queue<string> barcodes;
 volatile int sockfd = -1;
 struct sockaddr_in remote;
 struct sockaddr_in local;
 
+//llamo a la función para leer la ruta del archivo de configuración
+void readConfigFile();
 void barcodeReaderTask();
 void udpInit(char *serverIp, int serverPort);
 void udpSendTask();
@@ -44,6 +53,13 @@ int main(int argc, char *argv[]) {
 		return EXIT_SUCCESS;
 	}
 
+	readConfigFile(); // Se agrega la llamada a la función aquí.
+
+	//std::cout << "inputDevPath_Datalogic: " << inputDevPath_Datalogic << std::endl;
+	//std::cout << "inputDevPath_Unitech: " << inputDevPath_Unitech << std::endl;
+	//std::cout << "idScanner: " << idScanner << std::endl;
+	//std::cout << "sendIDScanner: " << sendIDScanner << std::endl;
+
 	udpInit(argv[1], stoi(argv[2]));
 
 	thread barcodeReaderThread(barcodeReaderTask);
@@ -55,6 +71,45 @@ int main(int argc, char *argv[]) {
 	udpRecvThread.join();
 
 	return EXIT_SUCCESS;
+}
+
+// función para leer la ruta del scanner desde el archivo de configuración
+void readConfigFile() {
+    std::ifstream configFile("/home/pi/andon/config.ini");
+    if (configFile.is_open()) {
+        std::string line;
+        while (std::getline(configFile, line)) {
+            size_t equals_pos = line.find('=');
+            if (equals_pos != std::string::npos) {
+                std::string variable_name = line.substr(0, equals_pos);
+                if (variable_name == "inputDevPath_Datalogic") {
+                    inputDevPath_Datalogic = line.substr(equals_pos + 1);
+                } 
+				else if (variable_name == "inputDevPath_Unitech") {
+                    inputDevPath_Unitech = line.substr(equals_pos + 1);
+                } 
+				else if (variable_name == "idScanner") {
+                    idScanner = line.substr(equals_pos + 1);
+                }
+				else if (variable_name == "sendIDScanner") {
+					if (line.substr(equals_pos + 1) == "true") {
+						sendIDScanner = true;
+				} else {
+						sendIDScanner = false;
+						}
+				}
+				else if (variable_name == "logMessageFile") {
+					if (line.substr(equals_pos + 1) == "true") {
+						logMessageFile = true;
+				} else {
+						logMessageFile = false;
+						}
+				}
+                // se pueden agregar mas condiciones para que lea otras variables
+            }
+        }
+    }
+    configFile.close();
 }
 
 void barcodeReaderTask() {
@@ -127,16 +182,34 @@ void udpInit(char *serverIp, int serverPort) {
 	bind(sockfd, (struct sockaddr *) &local, sizeof(local));
 }
 
-void udpSendTask() {
-	string str;
-	while (true) {
-		if (!barcodes.empty()) {
-			str = barcodes.front();
-			barcodes.pop();
-			sendto(sockfd, str.c_str(), strlen(str.c_str()), 0, (struct sockaddr *) &remote, sizeof(remote));
-		}
-	}
+void logMessage(const string& message) {
+  ofstream logFile;
+  logFile.open("log.txt", ios::app);
+
+  auto now = std::chrono::system_clock::now();
+  auto in_time_t = std::chrono::system_clock::to_time_t(now);
+  std::stringstream ss;
+  ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:") << std::setfill('0') << std::setw(2) << std::localtime(&in_time_t)->tm_min << ":" << std::setfill('0') << std::setw(2) << std::localtime(&in_time_t)->tm_sec;
+
+  logFile << "[" << ss.str() << "] " << message << endl;
+  logFile.close();
 }
+
+
+void udpSendTask() {
+  string str;
+  while (true) {
+    if (!barcodes.empty()) {
+      str = barcodes.front();
+      barcodes.pop();	  
+      sendto(sockfd, str.c_str(), strlen(str.c_str()), 0, (struct sockaddr *) &remote, sizeof(remote));
+      if (logMessageFile) {
+          logMessage("Sent: " + str);
+      }
+    }
+  }
+}
+
 
 void udpRecvTask() {
 	Led led1(15);
