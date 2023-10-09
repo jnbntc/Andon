@@ -184,7 +184,7 @@ void udpInit(char *serverIp, int serverPort) {
 
 void logMessage(const string& message) {
   ofstream logFile;
-  logFile.open("log.txt", ios::app);
+  logFile.open("/home/pi/andon/log.txt", ios::app);
 
   auto now = std::chrono::system_clock::now();
   auto in_time_t = std::chrono::system_clock::to_time_t(now);
